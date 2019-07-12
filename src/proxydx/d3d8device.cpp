@@ -3,7 +3,11 @@
 #include "d3d8device.h"
 #include "d3d8surface.h"
 #include "d3d8texture.h"
+#include "mge/mmefunctiondefs.h"
+#include <future>
 
+bool g_ShowDrawSteps = false;
+int g_DrawCallCount = 0;
 
 
 ProxyDevice::ProxyDevice(IDirect3DDevice9* real, ProxyD3D* d3d) : refcount(1), realDevice(real), proxD3D8(d3d), baseVertexIndex(0) {
@@ -66,6 +70,28 @@ BOOL _stdcall ProxyDevice::ShowCursor(BOOL a) {
 }
 
 HRESULT _stdcall ProxyDevice::Present(const RECT* a, const RECT* b, HWND c, const RGNDATA* d) {
+	
+	auto messageBox = [] {
+		MessageBoxA(nullptr, "Ready to see draw steps?", "Hey!", MB_OK);
+	};
+
+	static auto go = std::async(std::launch::async, messageBox);
+
+	if (g_ShowDrawSteps)
+	{
+		g_ShowDrawSteps = false;
+		char text[128];
+		sprintf(text, "%d drawcalls!", g_DrawCallCount);
+		MessageBoxA(nullptr, text, "Frame Finished!", MB_OK);
+		go = std::async(std::launch::async, messageBox);
+	}
+
+	if (go.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+	{
+		g_ShowDrawSteps = true;
+		g_DrawCallCount = 0;
+	}
+
     return realDevice->Present(a, b, c, d);
 }
 
@@ -444,23 +470,45 @@ HRESULT _stdcall ProxyDevice::GetCurrentTexturePalette(UINT* a) {
 
 //-----------------------------------------------------------------------------
 
+static void DrawStep(IDirect3DDevice9* realDevice)
+{
+	if (!g_ShowDrawSteps)
+		return;
+
+	g_DrawCallCount++;
+	realDevice->Present(0, 0, 0, 0);
+	std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+	MSG msg;
+	while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+	}
+}
+
 HRESULT _stdcall ProxyDevice::DrawPrimitive(D3DPRIMITIVETYPE a, UINT b, UINT c) {
+	DrawStep(realDevice);
     return realDevice->DrawPrimitive(a, b, c);
 }
 
 HRESULT _stdcall ProxyDevice::DrawIndexedPrimitive(D3DPRIMITIVETYPE a, UINT b, UINT c, UINT d, UINT e) {
+	DrawStep(realDevice);
     return realDevice->DrawIndexedPrimitive(a, (INT)baseVertexIndex, b, c, d, e);
 }
 
 HRESULT _stdcall ProxyDevice::DrawPrimitiveUP(D3DPRIMITIVETYPE a, UINT b, const void* c, UINT d) {
+	DrawStep(realDevice);
     return realDevice->DrawPrimitiveUP(a, b, c, d);
 }
 
 HRESULT _stdcall ProxyDevice::DrawIndexedPrimitiveUP(D3DPRIMITIVETYPE a, UINT b, UINT c, UINT d, const void* e, D3DFORMAT f, const void* g, UINT h) {
+	DrawStep(realDevice);
     return realDevice->DrawIndexedPrimitiveUP(a, b, c, d, e, f, g, h);
 }
 
 HRESULT _stdcall ProxyDevice::ProcessVertices(UINT a, UINT b, UINT c, IDirect3DVertexBuffer8* d, DWORD e) {
+	DrawStep(realDevice);
     return realDevice->ProcessVertices(a, b, c, (IDirect3DVertexBuffer9*)d, NULL, e);
 }
 
